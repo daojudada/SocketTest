@@ -17,8 +17,6 @@ import com.test.other.SessionUtils;
 
 
 import android.content.Context;
-import android.content.Intent;
-import android.os.Handler;
 
 /**
  * UDP连接的线�?
@@ -27,12 +25,6 @@ import android.os.Handler;
  */
 public class UDPMsgThread implements Runnable {
 
-    /**
-     * 新消息处理接�?
-     */
-    public interface OnNewMsgListener {
-        public void processMessage(android.os.Message pMsg);
-    }
 
     private static final String TAG = "UDPMessageListener";
     private static final String BROADCASTIP = "255.255.255.255";
@@ -44,17 +36,17 @@ public class UDPMsgThread implements Runnable {
     private static DatagramPacket sendDatagramPacket;
     private static DatagramSocket UDPSocket;
     private boolean isThreadRunning;
-    private List<OnNewMsgListener> mListenerList;
+    private List<MSGListener> mListenerList;
 	private DatagramPacket receiveDatagramPacket;
     private Thread receiveUDPThread;
     private String serverIp;
 
     public UDPMsgThread() {
-        mListenerList = new ArrayList<OnNewMsgListener>();
+        mListenerList = new ArrayList<MSGListener>();
         serverIp = null;
     }
 
-    public void addMsgListener(OnNewMsgListener listener) {
+    public void addMsgListener(MSGListener listener) {
         this.mListenerList.add(listener);
     }
     
@@ -62,6 +54,27 @@ public class UDPMsgThread implements Runnable {
     	return serverIp;
     }
 
+
+    /** �?始监听线�? **/
+    public void start() {
+        if (receiveUDPThread == null) {
+            receiveUDPThread = new Thread(this);
+            receiveUDPThread.start();
+        }
+        isThreadRunning = true;
+        LogUtils.i(TAG, "startUDPSocketThread() 线程启动成功");
+    }
+    
+    /** 暂停监听线程 **/
+    public void stop() {
+        isThreadRunning = false;
+        if (receiveUDPThread != null)
+            receiveUDPThread.interrupt();
+        receiveUDPThread = null;
+        instance = null; // 置空
+        LogUtils.i(TAG, "stopUDPSocketThread() 线程停止成功");
+    }
+    
     /** 建立Socket连接 **/
     public void connectUDPSocket() {
         try {
@@ -72,18 +85,17 @@ public class UDPMsgThread implements Runnable {
             
             LogUtils.i(TAG, "connectUDPSocket() 绑定端口成功");
 
-            // 创建数据接受�?
+            // 创建数据接受包
             if (receiveDatagramPacket == null)
                 receiveDatagramPacket = new DatagramPacket(receiveBuffer, BUFFERLENGTH);
 
-            startUDPSocketThread();
         }
         catch (SocketException e) {
             e.printStackTrace();
         }
     }
 
-    public void removeMsgListener(OnNewMsgListener listener) {
+    public void removeMsgListener(MSGListener listener) {
         this.mListenerList.remove(listener);
     }
 
@@ -121,9 +133,9 @@ public class UDPMsgThread implements Runnable {
 
             MSGProtocol msgRes = new MSGProtocol(UDPListenResStr);
             int command = msgRes.getCommandNo();
-
+            
             //调试模式下允许自己
-            if (true) 
+            if (!SessionUtils.isLocalUser(msgRes.getSenderIMEI())) 
             {
             	switch(command){
             	case MSGConst.BR_ENTRY:
@@ -132,10 +144,8 @@ public class UDPMsgThread implements Runnable {
             	case MSGConst.REANSENTRY:
             		serverIp = msgRes.getAddStr();
             		LogUtils.i(TAG, "找到服务器IP");
-                    for (OnNewMsgListener msgListener: mListenerList) {
-                        android.os.Message pMsg = new android.os.Message();
-                        pMsg.what = MSGConst.BR_ENTRY;
-                        msgListener.processMessage(pMsg);
+                    for (MSGListener msgListener: mListenerList) {
+                        msgListener.processMessage(msgRes);
                     }
                     break;
             		
@@ -158,41 +168,11 @@ public class UDPMsgThread implements Runnable {
 
     }
 
-    public boolean notifiBroad(){
+    public void notifiBroad(){
         sendUDPdata(MSGConst.BR_ENTRY, UDPMsgThread.BROADCASTIP);
-        
-        try {        
-        	Thread.sleep(3000);
-    	} catch (InterruptedException e) {      
-    		e.printStackTrace();
-		}
-        
-        if(serverIp == null)
-        	return false;
-        else 
-        	return true;
     }
     
 
-    /** �?始监听线�? **/
-    public void startUDPSocketThread() {
-        if (receiveUDPThread == null) {
-            receiveUDPThread = new Thread(this);
-            receiveUDPThread.start();
-        }
-        isThreadRunning = true;
-        LogUtils.i(TAG, "startUDPSocketThread() 线程启动成功");
-    }
-    
-    /** 暂停监听线程 **/
-    public void stopUDPSocketThread() {
-        isThreadRunning = false;
-        if (receiveUDPThread != null)
-            receiveUDPThread.interrupt();
-        receiveUDPThread = null;
-        instance = null; // 置空
-        LogUtils.i(TAG, "stopUDPSocketThread() 线程停止成功");
-    }
 
 
     /**
@@ -248,7 +228,7 @@ public class UDPMsgThread implements Runnable {
         sendUDPdata(ipmsgProtocol, targetIP);
     }
 
-    public void sendUDPdata(final MSGProtocol msg, final String targetIP) {
+    public void sendUDPdata(MSGProtocol msg, String targetIP) {
 		try {
 			sendBuffer = msg.getProtocolJSON().getBytes("gbk");
 		} catch (UnsupportedEncodingException e) {

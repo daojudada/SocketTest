@@ -7,6 +7,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.io.UnsupportedEncodingException;
+import java.net.InetAddress;
 import java.net.Socket;
 import java.net.UnknownHostException;
 import java.util.ArrayList;
@@ -17,7 +18,6 @@ import java.util.concurrent.Executors;
 import com.test.other.Entity;
 import com.test.other.LogUtils;
 import com.test.other.SessionUtils;
-import com.test.tcptest.UDPMsgThread.OnNewMsgListener;
 
 import android.content.Context;
 
@@ -35,15 +35,14 @@ public class TcpClient implements Runnable {
     private DataInputStream dataInput;
     private Thread receiveThread;
     private Socket socket ;
-    private List<OnNewMsgListener> mListenerList;
+    private List<MSGListener> mListenerList;
     private boolean isThreadRunning ; // 是否线程开始标志
 
     private TcpClient() {
         int cpuNums = Runtime.getRuntime().availableProcessors();
         executor = Executors.newFixedThreadPool(cpuNums * POOL_SIZE); // 根据CPU数目初始化线程池
-        mListenerList = new ArrayList<OnNewMsgListener>();
-        socket = null;
-        LogUtils.d(TAG, "建立线程成功");
+        mListenerList = new ArrayList<MSGListener>();
+        LogUtils.i(TAG, "建立线程成功");
 
     }
 
@@ -52,11 +51,11 @@ public class TcpClient implements Runnable {
     }
 
 
-    public void addMsgListener(OnNewMsgListener listener) {
+    public void addMsgListener(MSGListener listener) {
         this.mListenerList.add(listener);
     }
 
-    public void removeMsgListener(OnNewMsgListener listener) {
+    public void removeMsgListener(MSGListener listener) {
         this.mListenerList.remove(listener);
     }
 
@@ -75,66 +74,67 @@ public class TcpClient implements Runnable {
 
     private TcpClient(Context context) {
         this();
-        LogUtils.d(TAG, "TCP_Client初始化完毕");
+        LogUtils.i(TAG, "TCP_Client初始化完毕");
     }
 
+    /** 开始监听线程 **/
     public void start() {
-        LogUtils.d(TAG, "发送线程开启");
         isThreadRunning  = true; // 使能发送标识
-        if (!receiveThread.isAlive())
-        	 receiveThread.start();
+        if (receiveThread == null) {
+            receiveThread = new Thread(this);
+            receiveThread.start();
+        }
+        LogUtils.i(TAG, "发送线程开启");
     }
 
     /** 暂停监听线程 **/
     public void stop() {
-    	isThreadRunning  = false;
-        if (receiveThread != null)
-            receiveThread.interrupt();
-        receiveThread = null;
-        instance = null; // 置空, 消除静�?�变量引�?
-        LogUtils.i(TAG, "stopUDPSocketThread() 线程停止成功");
+        try {
+            output.close();
+			dataOutput.close();
+	        socket.close();
+	    	isThreadRunning  = false;
+	        if (receiveThread != null)
+	            receiveThread.interrupt();
+	        receiveThread = null;
+	        instance = null; // 置空,
+	        LogUtils.i(TAG, "stopSocketThread() 线程停止成功");
+		} catch (IOException e) {
+	        LogUtils.i(TAG, "stopSocketThread() 线程停止失败");
+			e.printStackTrace();
+		}
     }
     
     /** 建立Socket连接 **/
     public boolean connect(String target_IP) {
         try {
             // 绑定端口
-            if (socket == null)
-                socket = new Socket(target_IP, Constant.TCP_PORT);
-
+            if (socket == null){
+        		socket = new Socket(InetAddress.getByName(target_IP), Constant.TCP_PORT);
+            }
             output = socket.getOutputStream();
             input = socket.getInputStream();
             dataOutput = new DataOutputStream(output);
             dataInput = new DataInputStream(input);
             
             
-            LogUtils.i(TAG, "connectUDPSocket() 绑定端口成功");
-            startSocketThread();
+            LogUtils.i(TAG, "connectSocket() 绑定端口成功");
             return true;
         }
 	    catch (UnknownHostException e) {
-	        LogUtils.d(TAG, "建立客户端socket失败");
+	        LogUtils.e(TAG, "建立客户端socket失败");
 	        isThreadRunning = false;
 	        e.printStackTrace();
 	        return false;
 	    }
 	    catch (IOException e) {
-	        LogUtils.d(TAG, "建立客户端socket失败");
+	        LogUtils.e(TAG, "建立客户端socket失败");
 	        isThreadRunning = false;
 	        e.printStackTrace();
 	        return false;
 	    }
     }
     
-    /** �?始监听线�? **/
-    private void startSocketThread() {
-        if (receiveThread == null) {
-        	receiveThread = new Thread(this);
-            receiveThread.start();
-        }
-        isThreadRunning = true;
-        LogUtils.i(TAG, "startUDPSocketThread() 线程启动成功");
-    }
     
     
     @Override
@@ -154,7 +154,7 @@ public class TcpClient implements Runnable {
                     socket = null;
                 }
                 receiveThread = null;
-                LogUtils.e(TAG, "UDP数据包接收失败！线程停止");
+                LogUtils.e(TAG, "数据包接收失败！线程停止");
                 e.printStackTrace();
                 break;
             }
@@ -175,12 +175,9 @@ public class TcpClient implements Runnable {
             		default:
             			break;
             	}
-            	
 
-                for (int i = 0; i < mListenerList.size(); i++) {
-                    android.os.Message pMsg = new android.os.Message();
-                    pMsg.what = command;
-                    mListenerList.get(i).processMessage(pMsg);
+                for (MSGListener msgListener: mListenerList) {
+                    msgListener.processMessage(msgRes);
                 }
             }
 
@@ -225,16 +222,12 @@ public class TcpClient implements Runnable {
                      sendBuffer = msg.getProtocolJSON().getBytes("gbk");
                      dataOutput.write(sendBuffer);
                      dataOutput.flush();
-                     LogUtils.d(TAG, "Tcp msg发送完毕");
-                     output.close();
-                     dataOutput.close();
-                     socket.close();
+                     LogUtils.d(TAG, "sendData() 发送服务器数据包成功");
                  }
                  catch (Exception e) {
                      e.printStackTrace();
-                     LogUtils.e(TAG, "sendUDPdata() 发送UDP数据包失败");
+                     LogUtils.e(TAG, "sendData() 发送服务器数据包失败");
                  }
-
              }
          });
     }

@@ -1,15 +1,11 @@
 package com.test.tcptest;
 
 
-import java.io.IOException;
-
 import com.test.other.Entity;
 import com.test.other.LogUtils;
 import com.test.other.SessionUtils;
-import com.test.tcptest.UDPMsgThread.OnNewMsgListener;
 
 import android.content.Context;
-import android.os.Message;
 
 
 
@@ -18,12 +14,10 @@ import android.os.Message;
  * @author GuoJun
  *
  */
-public class WifiNet implements OnNewMsgListener{
+public class WifiNet implements NetInterface{
     public enum SocketMode{TCP,UDP}
     private Context mContext;
     private static final String TAG = "WifiNet";
-    private MSGListener clientListener;
-    private MSGListener serverListener;
     private boolean isServer;
     private UDPMsgThread mUDPListener;
     private TcpClient mClient;
@@ -32,47 +26,105 @@ public class WifiNet implements OnNewMsgListener{
     private String serverIp = null;
     
     
-    public WifiNet(Context context, OnNewMsgListener listener, MSGListener clientListener, MSGListener serverListener) {
+    public WifiNet(Context context) {
     	mContext = context;
-        mUDPListener = UDPMsgThread.getInstance(context);
-        mUDPListener.addMsgListener(listener);
-        mUDPListener.addMsgListener(this);
-        this.clientListener = clientListener;
-        this.serverListener = serverListener;
+    }
+    
+
+    @Override
+    public void addClientListener(MSGListener listener){
+    	mClient.addMsgListener(listener);
+    }
+    
+
+    @Override
+    public void addServerListener(MSGListener listener){
+    	mServer.addMsgListener(listener);
+    }
+    
+    public void addUdpListener(MSGListener listener){
+    	mUDPListener.addMsgListener(listener);
     }
     
     
+
+    @Override
+    public void removeClientListener(MSGListener listener){
+    	mClient.addMsgListener(listener);
+    }
+    
+
+    @Override
+    public void removeServerListener(MSGListener listener){
+    	mServer.addMsgListener(listener);
+    }
+    
+    public void removeUdpListener(MSGListener listener){
+    	mUDPListener.addMsgListener(listener);
+    }
+    
+	public void createUDP(){
+        mUDPListener = UDPMsgThread.getInstance(mContext);
+		mUDPListener.connectUDPSocket();
+		mUDPListener.start();
+	}
+
+    @Override
+    public void createClient(){
+    	isServer = false;
+    	mClient = TcpClient.getInstance(mContext);
+    }
+
+    @Override
     public boolean connectServer(){
 		return mClient.connect(serverIp);
     }
     
-
-	@Override
-	public void processMessage(Message pMsg) {
-		
-	}
-	
-    public void createClient(){
-    	mClient = TcpClient.getInstance(mContext);
-    	mClient.start();
-    }
     
-    public void createServer() throws IOException{
-    	mServer= TcpServer.getInstance(mContext);
+    @Override
+    public void startServer(){
     	mServer.start();
     }
     
-    public boolean findServer(){
-		mUDPListener.connectUDPSocket();
-		boolean isFind = mUDPListener.notifiBroad();
-    	serverIp = mUDPListener.getServerIp();
-    	return isFind;
+    @Override
+    public void startClient(){
+    	mClient.start();
     }
     
+    @Override
+    public void createServer(){
+    	isServer = true;
+    	mServer= TcpServer.getInstance(mContext);
+    }
+
+    @Override
+    public boolean findServer(){
+    	if(!isServer){
+    		mUDPListener.notifiBroad();
+    		long beginTime = System.currentTimeMillis();
+    		while(true){
+    			long diffTime = System.currentTimeMillis() - beginTime;
+        		serverIp = mUDPListener.getServerIp();
+    			if(diffTime > 3000 && serverIp == null)
+    				return false;
+    			if(serverIp != null){
+    				LogUtils.i(TAG, "找到服务器"+serverIp);
+    				return true;
+    			}
+    		}
+    	}
+    	else {
+    		LogUtils.i(TAG, "没有找到服务器");
+    		return false;
+    	}
+    }
+
+    @Override
     public TcpClient getClient(){
     	return mClient;
     }
-    
+
+    @Override
     public TcpServer getServer(){
     	return mServer;
     }
@@ -101,21 +153,16 @@ public class WifiNet implements OnNewMsgListener{
         }
         return ipmsgProtocol;
     }
-    
-    public void sendToAllClient(int commandNo, Object addData, SocketMode sm) {
-    	MSGProtocol ipmsg = packageMsg(commandNo,addData);
-    	if(ipmsg!=null){
 
-        	try {
+    @Override
+    public void sendToAllClient(int commandNo, Object addData, SocketMode sm) {
+    	if(isServer){
+	    	MSGProtocol ipmsg = packageMsg(commandNo,addData);
+	    	if(ipmsg!=null){
             	if(sm == SocketMode.TCP)
             		mServer.sendToAllClient(ipmsg);
-            }
-            catch (Exception e) {
-                e.printStackTrace();
-                LogUtils.e(TAG, "sendToClient() 发送数据包失败");
-            }
-            LogUtils.i(TAG, "sendToAllClient() 发送数据包成功");
-	    }
+		    }
+    	}
     }
     
     /*
@@ -137,14 +184,9 @@ public class WifiNet implements OnNewMsgListener{
 	    }
     }
      */
-    /**
-     * 发送ipmsg数据到指定客户端
-     * @param commandNo 
-     * @param addData 
-     * @param connectionID
-     * @param sm
-     */
+    
     /*
+     * 
     public void sendToClient(int commandNo, Object addData,int connectionID, SocketMode sm) {
     	MSGProtocol ipmsg = packageMsg(commandNo,addData);
     	if(ipmsg!=null){
@@ -164,33 +206,26 @@ public class WifiNet implements OnNewMsgListener{
     */
     
     
-    /**
-     * 发送ipmsg数据到服务器
-     * @param commandNo
-     * @param addData
-     * @param sm
-     */
+
+    @Override
     public void sendToServer(int commandNo, Object addData, SocketMode sm) {
-    	MSGProtocol ipmsg = packageMsg(commandNo,addData);
-    	if(ipmsg!=null){
-    		try {
+    	if(!isServer){
+	    	MSGProtocol ipmsg = packageMsg(commandNo,addData);
+	    	if(ipmsg!=null){
             	if(sm == SocketMode.TCP)
             		mClient.sendData(ipmsg);
         		else
         			mUDPListener.sendUDPdata(ipmsg, serverIp);
-                LogUtils.i(TAG, "sendToServer() 发送数据包成功");
-            }
-            catch (Exception e) {
-                e.printStackTrace();
-                LogUtils.e(TAG, "sendToServer() 发送数据包失败");
-            }
+	    	}
     	}
     }
     
 
   
- 		
+
+    @Override
  	public void stopNet(){
+ 		mUDPListener.stop();
     	if(isServer){
     		mServer.stop();
     	}

@@ -6,6 +6,7 @@
  * @author GuoJun
  *
  */
-public interface MSGListener{
-	void handleIPMSG(MSGProtocol ipmsg);
+
+public interface MSGListener {
+    public void processMessage(MSGProtocol pMsg);
 }

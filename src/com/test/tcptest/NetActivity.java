@@ -1,9 +1,7 @@
 package com.test.tcptest;
 
-import javax.security.auth.callback.Callback;
-
 import com.test.other.SessionUtils;
-import com.test.tcptest.UDPMsgThread.OnNewMsgListener;
+import com.test.tcptest.WifiNet.SocketMode;
 
 import android.app.Activity;
 import android.content.Context;
@@ -16,13 +14,14 @@ import android.telephony.TelephonyManager;
 import android.view.View;
 import android.widget.TextView;
 
-public class NetActivity extends Activity implements OnNewMsgListener{
+public class NetActivity extends Activity{
 
 	Boolean isServer;
     private TelephonyManager mTelephonyManager;
-    protected UDPMsgThread mUDPListener;
-    
+    private UDPMsgThread mUDPListener;
+    private WifiNet wifiNet;
     private TextView localIp,otherIp;
+    private TextView recMsg;
 	@Override
 	protected void onCreate(Bundle savedInstanceState) {
 		super.onCreate(savedInstanceState);
@@ -30,7 +29,7 @@ public class NetActivity extends Activity implements OnNewMsgListener{
 
 		localIp = (TextView)findViewById(R.id.local_ip);
 		otherIp = (TextView)findViewById(R.id.other_ip);
-		
+		recMsg = (TextView)findViewById(R.id.rec_msg);
 		
         
         mTelephonyManager = (TelephonyManager) this.getSystemService(Context.TELEPHONY_SERVICE);
@@ -43,16 +42,57 @@ public class NetActivity extends Activity implements OnNewMsgListener{
 		isServer = this.getIntent().getExtras().getBoolean("isServer");
 		
 		localIp.setText(SessionUtils.getLocalIPaddress());
-		if(isServer){
+		
+		wifiNet = new WifiNet(this);
+		wifiNet.createUDP();
+		wifiNet.addUdpListener(new MSGListener(){
+			@Override
+			public void processMessage(MSGProtocol pMsg) {
+				int command = pMsg.getCommandNo();
+		        android.os.Message msg = new android.os.Message();
+		        msg.what = command;
+				handler.sendMessage(msg);
+				
+			}
 			
+		});
+		if(wifiNet.findServer()){
+			wifiNet.createClient();
+			wifiNet.addClientListener(new MSGListener(){
+				@Override
+				public void processMessage(MSGProtocol pMsg) {
+					int command = pMsg.getCommandNo();
+			        android.os.Message msg = new android.os.Message();
+			        msg.what = command;
+					handler.sendMessage(msg);
+				}
+			});
+			wifiNet.connectServer();
+			wifiNet.startClient();
+			wifiNet.sendToServer(MSGConst.SENDMSG, "HI" + SessionUtils.getIMEI(), SocketMode.TCP);
 		}
 		else{
+			wifiNet.createServer();
+			wifiNet.startServer();
+			wifiNet.addServerListener(new MSGListener(){
+				@Override
+				public void processMessage(MSGProtocol pMsg) {
+					int command = pMsg.getCommandNo();
+			        android.os.Message msg = new android.os.Message();
+			        msg.what = command;
+			        Bundle b = new Bundle();
+			        b.putCharSequence("msg", pMsg.getAddStr());
+			        msg.setData(b);
+					handler.sendMessage(msg);
+				}
+			});
 		}
-		
-		
 		
 	}
 	
+	/**
+	 * 主线程处理
+	 */
 	Handler handler = new Handler(){
 		@Override
 		public void handleMessage(Message msg) {
@@ -61,6 +101,9 @@ public class NetActivity extends Activity implements OnNewMsgListener{
         		String ServerIp = mUDPListener.getServerIp();
         		otherIp.setText(ServerIp);
         		break;
+        	case MSGConst.SENDMSG:
+        		String s = msg.getData().getString("msg");
+        		recMsg.setText(s);
     	 	default:
     	 		break;
             }
@@ -72,10 +115,6 @@ public class NetActivity extends Activity implements OnNewMsgListener{
 	
 	
     
-	@Override
-	public void processMessage(Message pMsg) {
-		handler.sendMessage(pMsg);
-	}
 
 
 }
