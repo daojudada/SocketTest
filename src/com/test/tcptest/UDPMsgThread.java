@@ -28,11 +28,10 @@ public class UDPMsgThread implements Runnable {
 
     private static final String TAG = "UDPMessageListener";
     private static final String BROADCASTIP = "255.255.255.255";
-    private static final int BUFFERLENGTH = 2048; // 缓冲大小
     private static UDPMsgThread instance;
     
-    private static byte[] receiveBuffer = new byte[BUFFERLENGTH];
-    private static byte[] sendBuffer = new byte[BUFFERLENGTH];
+    private static byte[] receiveBuffer = new byte[Constant.READ_BUFFER_SIZE];
+    private static byte[] sendBuffer = new byte[Constant.READ_BUFFER_SIZE];
     private static DatagramPacket sendDatagramPacket;
     private static DatagramSocket UDPSocket;
     private boolean isThreadRunning;
@@ -40,7 +39,7 @@ public class UDPMsgThread implements Runnable {
 	private DatagramPacket receiveDatagramPacket;
     private Thread receiveUDPThread;
     private String serverIp;
-
+    
     public UDPMsgThread() {
         mListenerList = new ArrayList<MSGListener>();
         serverIp = null;
@@ -87,7 +86,7 @@ public class UDPMsgThread implements Runnable {
 
             // 创建数据接受包
             if (receiveDatagramPacket == null)
-                receiveDatagramPacket = new DatagramPacket(receiveBuffer, BUFFERLENGTH);
+                receiveDatagramPacket = new DatagramPacket(receiveBuffer, Constant.READ_BUFFER_SIZE);
 
         }
         catch (SocketException e) {
@@ -144,17 +143,17 @@ public class UDPMsgThread implements Runnable {
             	case MSGConst.REANSENTRY:
             		serverIp = msgRes.getAddStr();
             		LogUtils.i(TAG, "找到服务器IP");
-                    for (MSGListener msgListener: mListenerList) {
-                        msgListener.processMessage(msgRes);
-                    }
                     break;
-            		
             	}
+
+                for (MSGListener msgListener: mListenerList) {
+                    msgListener.processMessage(msgRes);
+                }
             }
 
             // 每次接收完UDP数据后，重置长度。否则可能会导致下次收到数据包被截断�?
             if (receiveDatagramPacket != null) {
-                receiveDatagramPacket.setLength(BUFFERLENGTH);
+                receiveDatagramPacket.setLength(Constant.READ_BUFFER_SIZE);
             }
 
         }
@@ -169,7 +168,7 @@ public class UDPMsgThread implements Runnable {
     }
 
     public void notifiBroad(){
-        sendUDPdata(MSGConst.BR_ENTRY, UDPMsgThread.BROADCASTIP);
+        sendUDPdata(MSGConst.BR_ENTRY, UDPMsgThread.BROADCASTIP, SessionUtils.getLocalIPaddress());
     }
     
 

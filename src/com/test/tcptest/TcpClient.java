@@ -7,28 +7,31 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.io.UnsupportedEncodingException;
+import java.net.BindException;
+import java.net.ConnectException;
 import java.net.InetAddress;
+import java.net.InetSocketAddress;
 import java.net.Socket;
+import java.net.SocketAddress;
+import java.net.SocketTimeoutException;
 import java.net.UnknownHostException;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 
-import com.test.other.Entity;
 import com.test.other.LogUtils;
 import com.test.other.SessionUtils;
 
 import android.content.Context;
+import android.os.Handler;
+import android.os.Looper;
+import android.os.Message;
 
 public class TcpClient implements Runnable {
     private static final String TAG = "TcpClient";
     private static TcpClient instance;
-    private static ExecutorService executor;
-    private static final int POOL_SIZE = 5; // 单个CPU线程池大小
     private static byte[] sendBuffer = new byte[Constant.READ_BUFFER_SIZE]; // 数据报内容
     private static byte[] receiveBuffer = new byte[Constant.READ_BUFFER_SIZE];// 数据报内容
-
+    private static MyHandler mHandler;
     private OutputStream output = null;
     private InputStream input = null;
     private DataOutputStream dataOutput;
@@ -36,11 +39,11 @@ public class TcpClient implements Runnable {
     private Thread receiveThread;
     private Socket socket ;
     private List<MSGListener> mListenerList;
+    private String serverIp;
     private boolean isThreadRunning ; // 是否线程开始标志
+    private boolean isConnect;
 
     private TcpClient() {
-        int cpuNums = Runtime.getRuntime().availableProcessors();
-        executor = Executors.newFixedThreadPool(cpuNums * POOL_SIZE); // 根据CPU数目初始化线程池
         mListenerList = new ArrayList<MSGListener>();
         LogUtils.i(TAG, "建立线程成功");
 
@@ -90,6 +93,8 @@ public class TcpClient implements Runnable {
     /** 暂停监听线程 **/
     public void stop() {
         try {
+        	input.close();
+        	dataInput.close();
             output.close();
 			dataOutput.close();
 	        socket.close();
@@ -105,40 +110,69 @@ public class TcpClient implements Runnable {
 		}
     }
     
+    public void setServerIp(String targetIp){
+        isConnect = false;
+    	this.serverIp = targetIp;
+    }
+    
+    /**
+	 * 主线程处理
+	 */
+	
+	
     /** 建立Socket连接 **/
-    public boolean connect(String target_IP) {
+    public boolean connect(String targetIp) {
         try {
             // 绑定端口
             if (socket == null){
-        		socket = new Socket(InetAddress.getByName(target_IP), Constant.TCP_PORT);
+        		socket = new Socket();
             }
+            
+            Looper.prepare();  
+            mHandler = new MyHandler();
+
+            SocketAddress address = new InetSocketAddress(InetAddress.getByName(targetIp),Constant.TCP_PORT);  
+
+            socket.connect(address, 3000);
             output = socket.getOutputStream();
             input = socket.getInputStream();
             dataOutput = new DataOutputStream(output);
             dataInput = new DataInputStream(input);
-            
-            
+            mHandler.sendEmptyMessage(1);
             LogUtils.i(TAG, "connectSocket() 绑定端口成功");
+        	Looper.loop();  
             return true;
-        }
-	    catch (UnknownHostException e) {
-	        LogUtils.e(TAG, "建立客户端socket失败");
-	        isThreadRunning = false;
-	        e.printStackTrace();
-	        return false;
-	    }
-	    catch (IOException e) {
-	        LogUtils.e(TAG, "建立客户端socket失败");
-	        isThreadRunning = false;
-	        e.printStackTrace();
-	        return false;
-	    }
+        }catch (BindException e) {  
+	        LogUtils.e(TAG,"IP地址或端口绑定异常！");
+    	} catch (UnknownHostException e) { 
+	        LogUtils.e(TAG, "未识别主机地址！"); 
+    	}catch (SocketTimeoutException e) {  
+	        LogUtils.e(TAG, "连接超时！");
+    	}catch (ConnectException e) {  
+	        LogUtils.e(TAG, "拒绝连接！");
+    	} catch (IOException e) {
+	        LogUtils.e(TAG, "连接失败");
+			e.printStackTrace();
+		}
+        return false;
     }
     
-    
+    public class MyHandler extends Handler{
+    	@Override
+		public void handleMessage(Message msg) {
+			switch (msg.what) {
+        	case 1: 
+                isConnect = true;
+        		break;
+    	 	default:
+    	 		break;
+            }
+		}
+    }
     
     @Override
     public void run() {
+    	connect(serverIp);
         while (isThreadRunning) {
         	try {
         		dataInput.read(receiveBuffer);
@@ -194,42 +228,25 @@ public class TcpClient implements Runnable {
 
     }
 
-    public void sendData(int commandNo) {
-        sendData(commandNo,  null);
-    }
-
-    public void sendData(int commandNo,  Object addData) {
-        MSGProtocol ipmsgProtocol = null;
-        String imei = SessionUtils.getIMEI();
-
-        if (addData == null) {
-            ipmsgProtocol = new MSGProtocol(imei, commandNo);
-        }
-        else if (addData instanceof Entity) {
-            ipmsgProtocol = new MSGProtocol(imei, commandNo, (Entity) addData);
-        }
-        else if (addData instanceof String) {
-            ipmsgProtocol = new MSGProtocol(imei, commandNo, (String) addData);
-        }
-        sendData(ipmsgProtocol);
-    }
 
     public void sendData(final MSGProtocol msg) {
-    	 executor.execute(new Runnable() {
-             @Override
-             public void run() {
-                 try {
-                     sendBuffer = msg.getProtocolJSON().getBytes("gbk");
-                     dataOutput.write(sendBuffer);
-                     dataOutput.flush();
-                     LogUtils.d(TAG, "sendData() 发送服务器数据包成功");
-                 }
-                 catch (Exception e) {
-                     e.printStackTrace();
-                     LogUtils.e(TAG, "sendData() 发送服务器数据包失败");
-                 }
-             }
-         });
+     	while(!isConnect){
+     	};
+		new Thread(new Runnable() {
+		     @Override
+		     public void run() {
+		         try {
+		             sendBuffer = msg.getProtocolJSON().getBytes("gbk");
+		             dataOutput.write(sendBuffer);
+		             dataOutput.flush();
+		             LogUtils.i(TAG, "sendData() 发送服务器数据包成功");
+		         }
+		         catch (Exception e) {
+		             e.printStackTrace();
+		             LogUtils.e(TAG, "sendData() 发送服务器数据包失败");
+		         }
+		     }
+		}).start();
     }
     
 }

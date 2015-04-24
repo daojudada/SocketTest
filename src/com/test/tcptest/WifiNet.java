@@ -76,8 +76,8 @@ public class WifiNet implements NetInterface{
     }
 
     @Override
-    public boolean connectServer(){
-		return mClient.connect(serverIp);
+    public void connectServer(){
+		mClient.setServerIp(serverIp);
     }
     
     
@@ -127,6 +127,10 @@ public class WifiNet implements NetInterface{
     @Override
     public TcpServer getServer(){
     	return mServer;
+    }
+    
+    public boolean getIsServer(){
+    	return isServer;
     }
     
     /**

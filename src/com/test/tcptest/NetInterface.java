@@ -42,7 +42,7 @@ public interface NetInterface {
 	     * 连接服务器
 	     * @return is connected successful
 	     */
-	    public boolean connectServer();
+	    public void connectServer();
 		   
 	    /**
 	     * 创建客户端

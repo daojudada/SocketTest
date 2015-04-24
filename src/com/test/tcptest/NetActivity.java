@@ -12,6 +12,8 @@ import android.os.Handler;
 import android.os.Message;
 import android.telephony.TelephonyManager;
 import android.view.View;
+import android.view.View.OnClickListener;
+import android.widget.Button;
 import android.widget.TextView;
 
 public class NetActivity extends Activity{
@@ -22,6 +24,8 @@ public class NetActivity extends Activity{
     private WifiNet wifiNet;
     private TextView localIp,otherIp;
     private TextView recMsg;
+    private Button sendMsg;
+    int log = 0;
 	@Override
 	protected void onCreate(Bundle savedInstanceState) {
 		super.onCreate(savedInstanceState);
@@ -30,8 +34,20 @@ public class NetActivity extends Activity{
 		localIp = (TextView)findViewById(R.id.local_ip);
 		otherIp = (TextView)findViewById(R.id.other_ip);
 		recMsg = (TextView)findViewById(R.id.rec_msg);
-		
-        
+		sendMsg = (Button)findViewById(R.id.send_msg);
+        sendMsg.setOnClickListener(new OnClickListener(){
+			@Override
+			public void onClick(View v) {
+				if(wifiNet.getIsServer()){
+					wifiNet.sendToAllClient(MSGConst.SENDMSG, log + "" +System.currentTimeMillis(), SocketMode.TCP);
+					log++;
+				}
+				else{
+					wifiNet.sendToServer(MSGConst.SENDMSG, log + "" +System.currentTimeMillis(), SocketMode.TCP);
+					log++;
+				}
+			}
+        });
         mTelephonyManager = (TelephonyManager) this.getSystemService(Context.TELEPHONY_SERVICE);
         String mIMEI = mTelephonyManager.getDeviceId();
         WifiManager wifiManager = (WifiManager)this.getSystemService(android.content.Context.WIFI_SERVICE );
@@ -50,9 +66,11 @@ public class NetActivity extends Activity{
 			public void processMessage(MSGProtocol pMsg) {
 				int command = pMsg.getCommandNo();
 		        android.os.Message msg = new android.os.Message();
+		        Bundle b = new Bundle();
+		        b.putString("Ip", pMsg.getAddStr());
 		        msg.what = command;
+		        msg.setData(b);
 				handler.sendMessage(msg);
-				
 			}
 			
 		});
@@ -69,7 +87,7 @@ public class NetActivity extends Activity{
 			});
 			wifiNet.connectServer();
 			wifiNet.startClient();
-			wifiNet.sendToServer(MSGConst.SENDMSG, "HI" + SessionUtils.getIMEI(), SocketMode.TCP);
+			wifiNet.sendToServer(MSGConst.SENDMSG, "first" + System.currentTimeMillis(), SocketMode.TCP);
 		}
 		else{
 			wifiNet.createServer();
@@ -97,13 +115,16 @@ public class NetActivity extends Activity{
 		@Override
 		public void handleMessage(Message msg) {
 			switch (msg.what) {
-        	case MSGConst.BR_ENTRY: // 用户上线
-        		String ServerIp = mUDPListener.getServerIp();
-        		otherIp.setText(ServerIp);
+        	case MSGConst.BR_ENTRY: 
+        		otherIp.setText(msg.getData().getString("Ip"));
+        		break;
+        	case MSGConst.REANSENTRY:
+        		otherIp.setText(msg.getData().getString("Ip"));
         		break;
         	case MSGConst.SENDMSG:
         		String s = msg.getData().getString("msg");
         		recMsg.setText(s);
+        		break;
     	 	default:
     	 		break;
             }
